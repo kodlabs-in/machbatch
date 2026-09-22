@@ -16,24 +16,34 @@ struct CLIApplication {
     if let slurmCommand = SlurmCommand(rawValue: command) {
       try CompatibilityManifest.current.validate(command: slurmCommand, arguments: arguments)
     }
-    if arguments.contains("--version") {
-      printVersion()
-      return
-    }
-    if arguments.contains("--help") {
-      printHelp(command: command)
-      return
-    }
+    guard !printMetadataIfRequested(command: command, arguments: arguments) else { return }
 
+    try dispatch(command: command, arguments: arguments)
+  }
+
+  private func dispatch(command: String, arguments: [String]) throws {
     switch command {
     case "sinfo": try printClusterInformation()
     case "sbatch": try submit(arguments)
     case "squeue": try printQueue()
     case "scancel": try cancel(arguments)
     case "sacct": try printAccounting(arguments)
+    case "doctor": try printDiagnostics()
     case "machbatch": printVersion()
     default: throw CLIError.unsupportedCommand(command)
     }
+  }
+
+  private func printMetadataIfRequested(command: String, arguments: [String]) -> Bool {
+    if arguments.contains("--version") {
+      printVersion()
+      return true
+    }
+    if arguments.contains("--help") {
+      printHelp(command: command)
+      return true
+    }
+    return false
   }
 
   private func printClusterInformation() throws {
@@ -76,6 +86,16 @@ struct CLIApplication {
     let store = try openStore()
     let jobs = try accountingJobs(arguments: arguments, store: store)
     print(SacctRenderer().render(jobs))
+  }
+
+  private func printDiagnostics() throws {
+    let store = try openStore()
+    guard try store.integrityCheck() else { throw CLIError.databaseIntegrityCheckFailed }
+    let host = try SystemResourceProbe().probe()
+    print("database: ok")
+    print("architecture: \(host.architecture.rawValue)")
+    print("processors: \(host.activeProcessorCount)")
+    print("memory: \(host.physicalMemoryMiB) MiB")
   }
 
   private func cancel(_ arguments: [String]) throws {
@@ -188,6 +208,7 @@ extension JobState {
 }
 
 enum CLIError: Error, CustomStringConvertible {
+  case databaseIntegrityCheckFailed
   case invalidJobID(String)
   case missingJobID
   case missingScript
@@ -196,6 +217,7 @@ enum CLIError: Error, CustomStringConvertible {
 
   var description: String {
     switch self {
+    case .databaseIntegrityCheckFailed: "database integrity check failed"
     case .invalidJobID(let value): "Invalid job id specified: \(value)"
     case .missingJobID: "No job identification provided"
     case .missingScript: "sbatch requires a script path or --wrap"

@@ -48,6 +48,15 @@ final class SQLiteJobStoreTests: XCTestCase {
     XCTAssertEqual(try reopened.job(id: created.id)?.submission, submission)
   }
 
+  func testIntegrityCheckReportsHealthyDatabase() throws {
+    let databaseURL = temporaryDatabaseURL()
+    defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let store = try SQLiteJobStore(path: databaseURL.path)
+    try store.migrate()
+
+    XCTAssertTrue(try store.integrityCheck())
+  }
+
   private func sampleSubmission(name: String) -> JobSubmission {
     JobSubmission(
       name: name,

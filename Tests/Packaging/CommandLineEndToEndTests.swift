@@ -17,6 +17,21 @@ final class CommandLineEndToEndTests: XCTestCase {
     XCTAssertTrue(result.output.contains("local*"), result.output)
   }
 
+  func testDoctorChecksDatabaseAndHost() throws {
+    let dataDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("machbatch-doctor-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dataDirectory) }
+
+    let result = try runMachBatch(
+      arguments: ["doctor"],
+      environment: ["MACHBATCH_DATA_DIR": dataDirectory.path]
+    )
+
+    XCTAssertEqual(result.status, 0, result.error)
+    XCTAssertTrue(result.output.contains("database: ok"), result.output)
+    XCTAssertTrue(result.output.contains("architecture:"), result.output)
+  }
+
   func testBatchSubmissionRunsThroughAccounting() throws {
     let dataDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("machbatch-e2e-\(UUID().uuidString)")
