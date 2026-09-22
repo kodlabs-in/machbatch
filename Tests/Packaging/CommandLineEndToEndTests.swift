@@ -6,7 +6,7 @@ final class CommandLineEndToEndTests: XCTestCase {
     let result = try runMachBatch(arguments: ["--version"], environment: [:])
 
     XCTAssertEqual(result.status, 0, result.error)
-    XCTAssertEqual(result.output, "MachBatch 0.1.0 — Slurm 26.05.4 CLI-compatible\n")
+    XCTAssertEqual(result.output, "MachBatch 0.1.1 — Slurm 26.05.4 CLI-compatible\n")
   }
 
   func testSinfoWorksWithAutomaticFirstRunConfiguration() throws {
