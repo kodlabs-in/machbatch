@@ -35,4 +35,31 @@ final class ProcessJobExecutorTests: XCTestCase {
     XCTAssertTrue(result.succeeded)
     XCTAssertEqual(output, "42")
   }
+
+  func testTerminatesAJobAfterItsWallTimeExpires() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("machbatch-timeout-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let job = JobRecord(
+      id: 43,
+      submission: JobSubmission(
+        name: "timeout",
+        user: "tester",
+        partition: "local",
+        command: ["/bin/sleep", "5"],
+        resources: Resources(cpuSlots: 1, memoryMiB: 128),
+        wallTime: WallTime(seconds: 1),
+        workingDirectory: directory.path
+      ),
+      state: .running,
+      submittedAt: Date()
+    )
+    let startedAt = Date()
+
+    let result = try ProcessJobExecutor().execute(job)
+
+    XCTAssertTrue(result.timedOut)
+    XCTAssertLessThan(Date().timeIntervalSince(startedAt), 4)
+  }
 }

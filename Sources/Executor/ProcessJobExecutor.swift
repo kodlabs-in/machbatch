@@ -1,13 +1,16 @@
 import ClusterCore
+import Darwin
 import Foundation
 
 public struct ExecutionResult: Equatable, Sendable {
   public let exitStatus: Int32
   public let terminatingSignal: Int32?
+  public let timedOut: Bool
 
-  public init(exitStatus: Int32, terminatingSignal: Int32?) {
+  public init(exitStatus: Int32, terminatingSignal: Int32?, timedOut: Bool = false) {
     self.exitStatus = exitStatus
     self.terminatingSignal = terminatingSignal
+    self.timedOut = timedOut
   }
 
   public var succeeded: Bool {
@@ -37,10 +40,14 @@ public struct ProcessJobExecutor: JobExecuting, Sendable {
     process.standardOutput = handles.output
     process.standardError = handles.error ?? handles.output
     try process.run()
-    process.waitUntilExit()
+    let timedOut = waitForExit(process, wallTime: job.submission.wallTime)
 
     let signal = process.terminationReason == .uncaughtSignal ? process.terminationStatus : nil
-    return ExecutionResult(exitStatus: process.terminationStatus, terminatingSignal: signal)
+    return ExecutionResult(
+      exitStatus: process.terminationStatus,
+      terminatingSignal: signal,
+      timedOut: timedOut
+    )
   }
 
   private func environment(for job: JobRecord) -> [String: String] {
@@ -98,6 +105,29 @@ public struct ProcessJobExecutor: JobExecuting, Sendable {
       return URL(fileURLWithPath: path)
     }
     return URL(fileURLWithPath: workingDirectory).appendingPathComponent(path)
+  }
+
+  private func waitForExit(_ process: Process, wallTime: WallTime) -> Bool {
+    let deadline = Date().addingTimeInterval(TimeInterval(wallTime.seconds))
+    guard !waitUntilStopped(process, deadline: deadline) else {
+      process.waitUntilExit()
+      return false
+    }
+
+    process.terminate()
+    let graceDeadline = Date().addingTimeInterval(1)
+    if !waitUntilStopped(process, deadline: graceDeadline) {
+      kill(process.processIdentifier, SIGKILL)
+    }
+    process.waitUntilExit()
+    return true
+  }
+
+  private func waitUntilStopped(_ process: Process, deadline: Date) -> Bool {
+    while process.isRunning, Date() < deadline {
+      Thread.sleep(forTimeInterval: 0.01)
+    }
+    return !process.isRunning
   }
 }
 

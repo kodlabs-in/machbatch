@@ -93,7 +93,12 @@ public final class ControllerService {
 
   private func finish(jobID: JobID, result: ExecutionResult) throws {
     try store.transition(jobID: jobID, to: .completing, reason: "process exited")
-    let finalState: JobState = result.succeeded ? .completed : .failed
+    let finalState: JobState
+    if result.timedOut {
+      finalState = .timeout
+    } else {
+      finalState = result.succeeded ? .completed : .failed
+    }
     try store.transition(
       jobID: jobID,
       to: finalState,
