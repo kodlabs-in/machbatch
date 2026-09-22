@@ -27,12 +27,23 @@ let package = Package(
     .target(name: "CProcessShim", publicHeadersPath: "include"),
     .target(name: "Executor", dependencies: ["ClusterCore", "CProcessShim"]),
     .target(
+      name: "Controller",
+      dependencies: ["ClusterCore", "Executor", "Persistence", "Scheduler"]
+    ),
+    .target(
       name: "RuntimeAdapters",
       dependencies: ["ClusterCore", "Compatibility", "Config"]
     ),
     .executableTarget(
       name: "CLI",
-      dependencies: ["ClusterCore", "Compatibility", "RuntimeAdapters"]
+      dependencies: [
+        "ClusterCore",
+        "Compatibility",
+        "Config",
+        "Persistence",
+        "ResourceProbe",
+        "RuntimeAdapters",
+      ]
     ),
     .executableTarget(
       name: "ControllerDaemon",
@@ -40,6 +51,7 @@ let package = Package(
         "Accounting",
         "ClusterCore",
         "Config",
+        "Controller",
         "Executor",
         "Persistence",
         "ResourceProbe",
@@ -64,7 +76,7 @@ let package = Package(
     ),
     .testTarget(
       name: "IntegrationTests",
-      dependencies: ["ClusterCore", "Persistence", "Scheduler"],
+      dependencies: ["ClusterCore", "Controller", "Executor", "Persistence", "Scheduler"],
       path: "Tests/Integration"
     ),
     .testTarget(

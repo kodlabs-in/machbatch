@@ -44,7 +44,35 @@ public final class SQLiteJobStore {
     try transaction {
       let submittedAt = Date()
       let jobID = try insertJob(submission, submittedAt: submittedAt)
-      try insertEvent(jobID: jobID, state: .pending, timestamp: submittedAt)
+      try insertEvent(
+        JobEvent(
+          jobID: jobID,
+          previousState: nil,
+          newState: .submitted,
+          actor: "system",
+          reason: "submission received",
+          timestamp: submittedAt
+        ))
+      try updateState(jobID: jobID, to: .validating)
+      try insertEvent(
+        JobEvent(
+          jobID: jobID,
+          previousState: .submitted,
+          newState: .validating,
+          actor: "system",
+          reason: "validation started",
+          timestamp: submittedAt
+        ))
+      try updateState(jobID: jobID, to: .pending)
+      try insertEvent(
+        JobEvent(
+          jobID: jobID,
+          previousState: .validating,
+          newState: .pending,
+          actor: "system",
+          reason: "submission accepted",
+          timestamp: submittedAt
+        ))
       return JobRecord(
         id: jobID,
         submission: submission,
@@ -70,6 +98,66 @@ public final class SQLiteJobStore {
     }
   }
 
+  public func jobs(state: JobState) throws -> [JobRecord] {
+    let sql = """
+      SELECT id, name, user_name, partition_name, command_json, cpu_slots,
+             memory_mib, wall_time_seconds, state, submitted_at
+      FROM jobs WHERE state = ? ORDER BY id
+      """
+
+    return try withStatement(sql) { statement in
+      try bind(state.rawValue, at: 1, to: statement)
+      var records: [JobRecord] = []
+      while sqlite3_step(statement) == SQLITE_ROW {
+        let id = JobID(sqlite3_column_int64(statement, 0))
+        records.append(try decodeJob(id: id, from: statement, columnOffset: 1))
+      }
+      return records
+    }
+  }
+
+  public func jobs() throws -> [JobRecord] {
+    let sql = """
+      SELECT id, name, user_name, partition_name, command_json, cpu_slots,
+             memory_mib, wall_time_seconds, state, submitted_at
+      FROM jobs ORDER BY id
+      """
+
+    return try withStatement(sql) { statement in
+      var records: [JobRecord] = []
+      while sqlite3_step(statement) == SQLITE_ROW {
+        let id = JobID(sqlite3_column_int64(statement, 0))
+        records.append(try decodeJob(id: id, from: statement, columnOffset: 1))
+      }
+      return records
+    }
+  }
+
+  public func transition(
+    jobID: JobID,
+    to newState: JobState,
+    actor: String = "system",
+    reason: String
+  ) throws {
+    try transaction {
+      guard let record = try job(id: jobID) else {
+        throw SQLiteJobStoreError.jobNotFound(jobID)
+      }
+      var lifecycle = JobLifecycle(initialState: record.state)
+      try lifecycle.transition(to: newState)
+      try updateState(jobID: jobID, to: newState)
+      try insertEvent(
+        JobEvent(
+          jobID: jobID,
+          previousState: record.state,
+          newState: newState,
+          actor: actor,
+          reason: reason,
+          timestamp: Date()
+        ))
+    }
+  }
+
   private func insertJob(_ submission: JobSubmission, submittedAt: Date) throws -> JobID {
     let sql = """
       INSERT INTO jobs(
@@ -87,44 +175,61 @@ public final class SQLiteJobStore {
       try bind(Int64(submission.resources.cpuSlots), at: 5, to: statement)
       try bind(submission.resources.memoryMiB, at: 6, to: statement)
       try bind(Int64(submission.wallTime.seconds), at: 7, to: statement)
-      try bind(JobState.pending.rawValue, at: 8, to: statement)
+      try bind(JobState.submitted.rawValue, at: 8, to: statement)
       try bind(submittedAt.timeIntervalSince1970, at: 9, to: statement)
       try expectDone(statement)
       return JobID(sqlite3_last_insert_rowid(database))
     }
   }
 
-  private func insertEvent(jobID: JobID, state: JobState, timestamp: Date) throws {
-    let sql = """
-      INSERT INTO job_events(job_id, previous_state, new_state, actor, reason, created_at)
-      VALUES (?, NULL, ?, 'system', 'submission accepted', ?)
-      """
-
-    try withStatement(sql) { statement in
-      try bind(jobID.rawValue, at: 1, to: statement)
-      try bind(state.rawValue, at: 2, to: statement)
-      try bind(timestamp.timeIntervalSince1970, at: 3, to: statement)
+  private func updateState(jobID: JobID, to state: JobState) throws {
+    try withStatement("UPDATE jobs SET state = ? WHERE id = ?") { statement in
+      try bind(state.rawValue, at: 1, to: statement)
+      try bind(jobID.rawValue, at: 2, to: statement)
       try expectDone(statement)
     }
   }
 
-  private func decodeJob(id: JobID, from statement: OpaquePointer) throws -> JobRecord {
-    let command: [String] = try decode(text(at: 3, from: statement))
-    guard let state = JobState(rawValue: text(at: 7, from: statement)) else {
+  private func insertEvent(_ event: JobEvent) throws {
+    let sql = """
+      INSERT INTO job_events(job_id, previous_state, new_state, actor, reason, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      """
+
+    try withStatement(sql) { statement in
+      try bind(event.jobID.rawValue, at: 1, to: statement)
+      try bind(event.previousState?.rawValue, at: 2, to: statement)
+      try bind(event.newState.rawValue, at: 3, to: statement)
+      try bind(event.actor, at: 4, to: statement)
+      try bind(event.reason, at: 5, to: statement)
+      try bind(event.timestamp.timeIntervalSince1970, at: 6, to: statement)
+      try expectDone(statement)
+    }
+  }
+
+  private func decodeJob(
+    id: JobID,
+    from statement: OpaquePointer,
+    columnOffset: Int32 = 0
+  ) throws -> JobRecord {
+    let command: [String] = try decode(text(at: columnOffset + 3, from: statement))
+    guard let state = JobState(rawValue: text(at: columnOffset + 7, from: statement)) else {
       throw SQLiteJobStoreError.invalidStoredState
     }
     let submission = JobSubmission(
-      name: text(at: 0, from: statement),
-      user: text(at: 1, from: statement),
-      partition: text(at: 2, from: statement),
+      name: text(at: columnOffset, from: statement),
+      user: text(at: columnOffset + 1, from: statement),
+      partition: text(at: columnOffset + 2, from: statement),
       command: command,
       resources: Resources(
-        cpuSlots: Int(sqlite3_column_int64(statement, 4)),
-        memoryMiB: sqlite3_column_int64(statement, 5)
+        cpuSlots: Int(sqlite3_column_int64(statement, columnOffset + 4)),
+        memoryMiB: sqlite3_column_int64(statement, columnOffset + 5)
       ),
-      wallTime: WallTime(seconds: Int(sqlite3_column_int64(statement, 6)))
+      wallTime: WallTime(seconds: Int(sqlite3_column_int64(statement, columnOffset + 6)))
     )
-    let submittedAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 8))
+    let submittedAt = Date(
+      timeIntervalSince1970: sqlite3_column_double(statement, columnOffset + 8)
+    )
     return JobRecord(id: id, submission: submission, state: state, submittedAt: submittedAt)
   }
 
@@ -176,6 +281,14 @@ public final class SQLiteJobStore {
     }
   }
 
+  private func bind(_ value: String?, at index: Int32, to statement: OpaquePointer) throws {
+    guard let value else {
+      guard sqlite3_bind_null(statement, index) == SQLITE_OK else { throw databaseError() }
+      return
+    }
+    try bind(value, at: index, to: statement)
+  }
+
   private func bind(_ value: Int64, at index: Int32, to statement: OpaquePointer) throws {
     guard sqlite3_bind_int64(statement, index, value) == SQLITE_OK else {
       throw databaseError()
@@ -225,6 +338,16 @@ public enum SQLiteJobStoreError: Error, Equatable {
   case database(String)
   case invalidJSON
   case invalidStoredState
+  case jobNotFound(JobID)
+}
+
+private struct JobEvent {
+  let jobID: JobID
+  let previousState: JobState?
+  let newState: JobState
+  let actor: String
+  let reason: String
+  let timestamp: Date
 }
 
 extension SQLiteJobStore {
