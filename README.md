@@ -5,7 +5,7 @@ MachBatch is a native, CPU-first workload manager for macOS. It makes one Mac be
 MachBatch targets the Slurm 26.05.4 CLI contract and runs as a private, single-user cluster on macOS 13 Ventura or newer. CPU and memory are admission-control resources; logical nodes do not create additional hardware or provide container-grade isolation.
 
 > [!IMPORTANT]
-> MachBatch is under active development. Batch submission, local scheduling, execution, accounting, timeout handling, and recovery foundations work today. Interactive jobs, full process-tree cancellation, policy administration, packaging, signing, and the complete V1 Slurm option profile are not finished yet. See [Current command coverage](#current-command-coverage).
+> MachBatch is under active development. Batch submission, local scheduling, execution, accounting, timeout handling, recovery foundations, and Homebrew installation work today. Interactive jobs, full process-tree cancellation, policy administration, signing, and the complete V1 Slurm option profile are not finished yet. See [Current command coverage](#current-command-coverage).
 
 ## Why MachBatch?
 
@@ -21,14 +21,44 @@ MachBatch targets the Slurm 26.05.4 CLI contract and runs as a private, single-u
 
 - macOS 13 Ventura or newer
 - Apple Silicon (`arm64`) or Intel (`x86_64`)
-- Xcode 16 or a Swift 6.2-compatible toolchain
 - The system SQLite library included with macOS
 
 MachBatch does not require a database server, Docker, a virtual machine, or root privileges for normal operation.
 
+The current precompiled Homebrew bottle is tested on Apple Silicon with macOS 26 and is usable on newer compatible macOS releases. Other supported Macs may build the formula from source until additional native bottles are published. Source builds require Xcode 26 or another Swift 6.2-compatible toolchain.
+
+## Install with Homebrew
+
+Homebrew is the recommended installation path:
+
+```bash
+brew install kodlabs-in/tap/machbatch
+```
+
+Homebrew installs `machbatch`, `machbatchd`, and all eleven Slurm-compatible command links. Verify the installation:
+
+```bash
+machbatch --version
+machbatch doctor
+sinfo
+```
+
+Upgrade through Homebrew:
+
+```bash
+brew update
+brew upgrade machbatch
+```
+
+Uninstalling removes Homebrew-managed commands but preserves configuration, spool files, and job history under `~/Library/Application Support/MachBatch`:
+
+```bash
+brew uninstall machbatch
+```
+
 ## Install from source
 
-Homebrew and signed/notarized package distribution are planned but are not available yet. Build the current development version with Swift Package Manager:
+For development or platforms without a matching bottle, build MachBatch with Swift Package Manager:
 
 ```bash
 git clone https://github.com/kodlabs-in/machbatch.git
@@ -285,8 +315,8 @@ Development follows red-green-refactor TDD. New command options must include tes
 
 Completed foundations include configuration discovery, resource probing, logical nodes, SQLite persistence, job lifecycle validation, priority/FIFO scheduling, basic backfill, immutable script spooling, environment persistence, output routing, wall-time termination, accounting views, restart recovery, and health diagnostics.
 
-Before a stable V1 release, MachBatch still requires the Unix-socket controller protocol, long-running LaunchAgent operation, process-session supervision, running-job cancellation, interactive PTY execution, fully wired arrays and dependencies, QOS/account administration, complete reporting commands, reference-generated golden fixtures, Homebrew packaging, signing, notarization, and real Intel hardware validation.
+Before a stable V1 release, MachBatch still requires the Unix-socket controller protocol, long-running LaunchAgent operation, process-session supervision, running-job cancellation, interactive PTY execution, fully wired arrays and dependencies, QOS/account administration, complete reporting commands, reference-generated golden fixtures, additional Homebrew bottle coverage, signing, notarization, and real Intel hardware validation.
 
 ## License
 
-A distribution license has not been selected yet. Until a license file is added, do not assume rights to redistribute or modify the source outside the permissions granted by applicable law.
+MachBatch is available under the [MIT License](LICENSE).
