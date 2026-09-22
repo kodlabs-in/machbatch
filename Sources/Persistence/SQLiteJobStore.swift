@@ -167,7 +167,7 @@ public final class SQLiteJobStore {
       """
 
     return try withStatement(sql) { statement in
-      let commandJSON = try encode(submission.command)
+      let commandJSON = try encode(StoredExecution(submission: submission))
       try bind(submission.name, at: 1, to: statement)
       try bind(submission.user, at: 2, to: statement)
       try bind(submission.partition, at: 3, to: statement)
@@ -212,7 +212,7 @@ public final class SQLiteJobStore {
     from statement: OpaquePointer,
     columnOffset: Int32 = 0
   ) throws -> JobRecord {
-    let command: [String] = try decode(text(at: columnOffset + 3, from: statement))
+    let execution = try decodeExecution(text(at: columnOffset + 3, from: statement))
     guard let state = JobState(rawValue: text(at: columnOffset + 7, from: statement)) else {
       throw SQLiteJobStoreError.invalidStoredState
     }
@@ -220,19 +220,25 @@ public final class SQLiteJobStore {
       name: text(at: columnOffset, from: statement),
       user: text(at: columnOffset + 1, from: statement),
       partition: text(at: columnOffset + 2, from: statement),
-      command: command,
+      command: execution.command,
       resources: Resources(
         cpuSlots: Int(sqlite3_column_int64(statement, columnOffset + 4)),
         memoryMiB: sqlite3_column_int64(statement, columnOffset + 5)
       ),
-      wallTime: WallTime(seconds: Int(sqlite3_column_int64(statement, columnOffset + 6)))
+      wallTime: WallTime(seconds: Int(sqlite3_column_int64(statement, columnOffset + 6))),
+      workingDirectory: execution.workingDirectory,
+      outputPath: execution.outputPath,
+      errorPath: execution.errorPath,
+      environment: execution.environment
     )
     let submittedAt = Date(
       timeIntervalSince1970: sqlite3_column_double(statement, columnOffset + 8)
     )
     return JobRecord(id: id, submission: submission, state: state, submittedAt: submittedAt)
   }
+}
 
+extension SQLiteJobStore {
   private func transaction<T>(_ work: () throws -> T) throws -> T {
     try execute("BEGIN IMMEDIATE")
     do {
@@ -321,6 +327,15 @@ public final class SQLiteJobStore {
     return try JSONDecoder().decode(T.self, from: data)
   }
 
+  private func decodeExecution(_ value: String) throws -> StoredExecution {
+    do {
+      return try decode(value)
+    } catch {
+      let legacyCommand: [String] = try decode(value)
+      return StoredExecution(command: legacyCommand)
+    }
+  }
+
   private func databaseError() -> SQLiteJobStoreError {
     .database(databaseMessage)
   }
@@ -348,6 +363,30 @@ private struct JobEvent {
   let actor: String
   let reason: String
   let timestamp: Date
+}
+
+private struct StoredExecution: Codable {
+  let command: [String]
+  let workingDirectory: String
+  let outputPath: String
+  let errorPath: String?
+  let environment: [String: String]
+
+  init(submission: JobSubmission) {
+    command = submission.command
+    workingDirectory = submission.workingDirectory
+    outputPath = submission.outputPath
+    errorPath = submission.errorPath
+    environment = submission.environment
+  }
+
+  init(command: [String]) {
+    self.command = command
+    workingDirectory = FileManager.default.currentDirectoryPath
+    outputPath = "slurm-%j.out"
+    errorPath = nil
+    environment = [:]
+  }
 }
 
 extension SQLiteJobStore {

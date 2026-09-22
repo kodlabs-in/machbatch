@@ -29,7 +29,7 @@ public struct SchedulerEngine: Sendable {
 
     for job in orderedJobs {
       let proposedAllocation = allocated + job.resources
-      guard proposedAllocation.fits(within: available) else { break }
+      guard proposedAllocation.fits(within: available) else { continue }
       selected.append(job)
       allocated = proposedAllocation
     }

@@ -17,7 +17,7 @@ let package = Package(
     .target(name: "ResourceProbe", dependencies: ["ClusterCore"]),
     .target(name: "PriorityEngine", dependencies: ["ClusterCore"]),
     .target(name: "Scheduler", dependencies: ["ClusterCore", "PriorityEngine"]),
-    .systemLibrary(name: "CSQLite", pkgConfig: "sqlite3"),
+    .systemLibrary(name: "CSQLite"),
     .target(
       name: "Persistence",
       dependencies: ["ClusterCore", "CSQLite"],
@@ -86,7 +86,7 @@ let package = Package(
     ),
     .testTarget(
       name: "CrashRecoveryTests",
-      dependencies: ["ClusterCore", "Persistence", "Scheduler"],
+      dependencies: ["ClusterCore", "Controller", "Executor", "Persistence", "Scheduler"],
       path: "Tests/CrashRecovery"
     ),
     .testTarget(

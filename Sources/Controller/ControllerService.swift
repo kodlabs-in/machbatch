@@ -43,6 +43,21 @@ public final class ControllerService {
     }
   }
 
+  public func recoverInterruptedJobs(liveJobIDs: Set<JobID>) throws {
+    let recoverableStates: [JobState] = [
+      .allocated, .starting, .running, .suspended, .completing,
+    ]
+    for state in recoverableStates {
+      for job in try store.jobs(state: state) where !liveJobIDs.contains(job.id) {
+        try store.transition(
+          jobID: job.id,
+          to: .nodeFail,
+          reason: "supervisor unavailable during controller recovery"
+        )
+      }
+    }
+  }
+
   private var availableResources: Resources {
     Resources(
       cpuSlots: ledger.capacity.cpuSlots - ledger.allocated.cpuSlots,

@@ -22,6 +22,32 @@ final class SQLiteJobStoreTests: XCTestCase {
     XCTAssertEqual(try reopenedStore.job(id: firstJob.id)?.state, .pending)
   }
 
+  func testExecutionContextSurvivesReopen() throws {
+    let databaseURL = temporaryDatabaseURL()
+    defer { try? FileManager.default.removeItem(at: databaseURL) }
+    let submission = JobSubmission(
+      name: "context",
+      user: "tester",
+      partition: "local",
+      command: ["/usr/bin/printenv", "MODE"],
+      resources: Resources(cpuSlots: 1, memoryMiB: 128),
+      wallTime: WallTime(seconds: 60),
+      workingDirectory: "/private/tmp",
+      outputPath: "custom-%j.out",
+      errorPath: "custom-%j.err",
+      environment: ["MODE": "test"]
+    )
+    let store = try SQLiteJobStore(path: databaseURL.path)
+    try store.migrate()
+    let created = try store.createJob(submission)
+    try store.close()
+
+    let reopened = try SQLiteJobStore(path: databaseURL.path)
+    try reopened.migrate()
+
+    XCTAssertEqual(try reopened.job(id: created.id)?.submission, submission)
+  }
+
   private func sampleSubmission(name: String) -> JobSubmission {
     JobSubmission(
       name: name,

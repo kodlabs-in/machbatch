@@ -20,6 +20,10 @@ struct CLIApplication {
       printVersion()
       return
     }
+    if arguments.contains("--help") {
+      printHelp(command: command)
+      return
+    }
 
     switch command {
     case "sinfo": try printClusterInformation()
@@ -39,18 +43,27 @@ struct CLIApplication {
   }
 
   private func submit(_ arguments: [String]) throws {
-    let command = try wrappedCommand(from: arguments)
+    let source = try batchSource(from: arguments)
+    let options = try BatchOptionResolver().resolve(script: source.script, commandLine: arguments)
     let store = try openStore()
     let submission = JobSubmission(
-      name: "wrap",
+      name: options.jobName,
       user: NSUserName(),
-      partition: "local",
-      command: ["/bin/zsh", "-c", command],
-      resources: Resources(cpuSlots: 1, memoryMiB: 128),
-      wallTime: WallTime(seconds: 60)
+      partition: options.partition,
+      command: source.command,
+      resources: Resources(cpuSlots: options.cpuSlots, memoryMiB: options.memoryMiB),
+      wallTime: options.wallTime,
+      workingDirectory: options.workingDirectory ?? FileManager.default.currentDirectoryPath,
+      outputPath: options.outputPath,
+      errorPath: options.errorPath,
+      environment: options.environmentExport.resolve(from: ProcessInfo.processInfo.environment)
     )
     let job = try store.createJob(submission)
-    print("Submitted batch job \(job.id.rawValue)")
+    let confirmation =
+      options.parsable
+      ? String(job.id.rawValue)
+      : "Submitted batch job \(job.id.rawValue)"
+    print(confirmation)
   }
 
   private func printQueue() throws {
@@ -90,11 +103,44 @@ struct CLIApplication {
     return try store.job(id: JobID(rawID)).map { [$0] } ?? []
   }
 
-  private func wrappedCommand(from arguments: [String]) throws -> String {
-    guard let command = optionValue(named: "--wrap", shortName: nil, in: arguments) else {
-      throw CLIError.missingWrapCommand
+  private func batchSource(from arguments: [String]) throws -> BatchSource {
+    if let command = optionValue(named: "--wrap", shortName: nil, in: arguments) {
+      return BatchSource(script: "", command: ["/bin/zsh", "-c", command])
     }
-    return command
+    guard let path = arguments.last(where: { !$0.hasPrefix("-") }),
+      FileManager.default.fileExists(atPath: path)
+    else {
+      throw CLIError.missingScript
+    }
+    let script = try String(contentsOfFile: path, encoding: .utf8)
+    let spoolURL = try spool(script)
+    return BatchSource(script: script, command: try interpreterCommand(script, path: spoolURL.path))
+  }
+
+  private func spool(_ script: String) throws -> URL {
+    try paths.prepare()
+    let directory = paths.spoolDirectory.appendingPathComponent("scripts", isDirectory: true)
+    try FileManager.default.createDirectory(
+      at: directory,
+      withIntermediateDirectories: true,
+      attributes: [.posixPermissions: 0o700]
+    )
+    let destination = directory.appendingPathComponent("\(UUID().uuidString).sh")
+    try Data(script.utf8).write(to: destination, options: .atomic)
+    try FileManager.default.setAttributes(
+      [.posixPermissions: 0o600], ofItemAtPath: destination.path)
+    return destination
+  }
+
+  private func interpreterCommand(_ script: String, path: String) throws -> [String] {
+    guard let firstLine = script.split(separator: "\n", maxSplits: 1).first,
+      firstLine.hasPrefix("#!")
+    else {
+      throw CLIError.missingShebang
+    }
+    let interpreter = firstLine.dropFirst(2).split(whereSeparator: \.isWhitespace).map(String.init)
+    guard !interpreter.isEmpty else { throw CLIError.missingShebang }
+    return interpreter + [path]
   }
 
   private func optionValue(
@@ -125,6 +171,14 @@ struct CLIApplication {
     let profile = CompatibilityProfile.current
     print("\(profile.name) — \(profile.cliCompatibility)")
   }
+
+  private func printHelp(command: String) {
+    let options =
+      CompatibilityManifest.current.commands
+      .first(where: { $0.command.rawValue == command })?
+      .options.sorted().joined(separator: ", ") ?? ""
+    print("Usage: \(command) [OPTIONS]\nSupported options: \(options)")
+  }
 }
 
 extension JobState {
@@ -136,15 +190,22 @@ extension JobState {
 enum CLIError: Error, CustomStringConvertible {
   case invalidJobID(String)
   case missingJobID
-  case missingWrapCommand
+  case missingScript
+  case missingShebang
   case unsupportedCommand(String)
 
   var description: String {
     switch self {
     case .invalidJobID(let value): "Invalid job id specified: \(value)"
     case .missingJobID: "No job identification provided"
-    case .missingWrapCommand: "sbatch requires --wrap in this build"
+    case .missingScript: "sbatch requires a script path or --wrap"
+    case .missingShebang: "batch script requires a valid shebang"
     case .unsupportedCommand(let command): "unsupported command: \(command)"
     }
   }
+}
+
+private struct BatchSource {
+  let script: String
+  let command: [String]
 }

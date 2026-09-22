@@ -7,6 +7,10 @@ public struct JobSubmission: Equatable, Codable, Sendable {
   public let command: [String]
   public let resources: Resources
   public let wallTime: WallTime
+  public let workingDirectory: String
+  public let outputPath: String
+  public let errorPath: String?
+  public let environment: [String: String]
 
   public init(
     name: String,
@@ -14,7 +18,11 @@ public struct JobSubmission: Equatable, Codable, Sendable {
     partition: String,
     command: [String],
     resources: Resources,
-    wallTime: WallTime
+    wallTime: WallTime,
+    workingDirectory: String = FileManager.default.currentDirectoryPath,
+    outputPath: String = "slurm-%j.out",
+    errorPath: String? = nil,
+    environment: [String: String] = [:]
   ) {
     self.name = name
     self.user = user
@@ -22,6 +30,10 @@ public struct JobSubmission: Equatable, Codable, Sendable {
     self.command = command
     self.resources = resources
     self.wallTime = wallTime
+    self.workingDirectory = workingDirectory
+    self.outputPath = outputPath
+    self.errorPath = errorPath
+    self.environment = environment
   }
 }
 

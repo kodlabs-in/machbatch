@@ -80,11 +80,88 @@ final class CommandLineEndToEndTests: XCTestCase {
     XCTAssertTrue(accounting.output.contains("CANCELLED"), accounting.output)
   }
 
+  func testSubmittedScriptUsesImmutableSpoolCopy() throws {
+    let dataDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("machbatch-e2e-\(UUID().uuidString)")
+    let scriptURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("machbatch-script-\(UUID().uuidString).zsh")
+    defer {
+      try? FileManager.default.removeItem(at: dataDirectory)
+      try? FileManager.default.removeItem(at: scriptURL)
+    }
+    try "#!/bin/zsh\n#SBATCH --job-name durable-script\nexit 0\n".write(
+      to: scriptURL,
+      atomically: true,
+      encoding: .utf8
+    )
+    let environment = ["MACHBATCH_DATA_DIR": dataDirectory.path]
+
+    let submission = try runMachBatch(
+      arguments: ["sbatch", scriptURL.path], environment: environment)
+    try "#!/bin/zsh\nexit 1\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+    let daemon = try runExecutable(
+      named: "machbatchd",
+      arguments: ["--once"],
+      environment: environment
+    )
+    let accounting = try runMachBatch(
+      arguments: ["sacct", "--jobs", "1"], environment: environment)
+
+    XCTAssertEqual(submission.status, 0, submission.error)
+    XCTAssertEqual(daemon.status, 0, daemon.error)
+    XCTAssertTrue(accounting.output.contains("durable-script"), accounting.output)
+    XCTAssertTrue(accounting.output.contains("COMPLETED"), accounting.output)
+  }
+
+  func testBatchExecutionUsesRequestedDirectoryOutputAndEnvironment() throws {
+    let dataDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("machbatch-e2e-\(UUID().uuidString)")
+    let workingDirectory = dataDirectory.appendingPathComponent("work")
+    defer { try? FileManager.default.removeItem(at: dataDirectory) }
+    try FileManager.default.createDirectory(
+      at: workingDirectory,
+      withIntermediateDirectories: true
+    )
+    let environment = ["MACHBATCH_DATA_DIR": dataDirectory.path]
+
+    let submission = try runMachBatch(
+      arguments: [
+        "sbatch", "--wrap", "printf \"$MODE:$PWD\"", "--chdir", workingDirectory.path,
+        "--output", "result-%j.txt", "--export", "NONE,MODE=test",
+      ],
+      environment: environment
+    )
+    let daemon = try runExecutable(
+      named: "machbatchd",
+      arguments: ["--once"],
+      environment: environment
+    )
+    let output = try String(
+      contentsOf: workingDirectory.appendingPathComponent("result-1.txt"),
+      encoding: .utf8
+    )
+
+    XCTAssertEqual(submission.status, 0, submission.error)
+    XCTAssertEqual(daemon.status, 0, daemon.error)
+    XCTAssertTrue(output.hasPrefix("test:"), output)
+    let reportedDirectory = String(output.dropFirst("test:".count))
+    let expectedIdentity = try fileIdentity(atPath: workingDirectory.path)
+    let reportedIdentity = try fileIdentity(atPath: reportedDirectory)
+    XCTAssertEqual(reportedIdentity, expectedIdentity)
+  }
+
   private func runMachBatch(
     arguments: [String],
     environment: [String: String]
   ) throws -> CommandResult {
     try runExecutable(named: "machbatch", arguments: arguments, environment: environment)
+  }
+
+  private func fileIdentity(atPath path: String) throws -> [UInt64] {
+    let attributes = try FileManager.default.attributesOfItem(atPath: path)
+    return [.systemNumber, .systemFileNumber].map { key in
+      (attributes[key] as? NSNumber)?.uint64Value ?? 0
+    }
   }
 
   private func runExecutable(
@@ -97,6 +174,13 @@ final class CommandLineEndToEndTests: XCTestCase {
     process.executableURL = productsDirectory.appendingPathComponent(executableName)
     process.arguments = arguments
     process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+    if let dataDirectory = environment["MACHBATCH_DATA_DIR"] {
+      try FileManager.default.createDirectory(
+        atPath: dataDirectory,
+        withIntermediateDirectories: true
+      )
+      process.currentDirectoryURL = URL(fileURLWithPath: dataDirectory)
+    }
 
     let output = Pipe()
     let error = Pipe()
