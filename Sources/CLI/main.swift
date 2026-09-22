@@ -18,9 +18,8 @@ enum MachBatchCommand {
     invocation: String,
     arguments: inout [String]
   ) -> String {
-    guard invocation == "machbatch", let command = arguments.first else {
-      return invocation
-    }
+    guard invocation == "machbatch" else { return invocation }
+    guard let command = arguments.first, !command.hasPrefix("-") else { return invocation }
     arguments.removeFirst()
     return command
   }

@@ -189,7 +189,7 @@ struct CLIApplication {
 
   private func printVersion() {
     let profile = CompatibilityProfile.current
-    print("\(profile.name) — \(profile.cliCompatibility)")
+    print("\(profile.name) \(profile.releaseVersion) — \(profile.cliCompatibility)")
   }
 
   private func printHelp(command: String) {

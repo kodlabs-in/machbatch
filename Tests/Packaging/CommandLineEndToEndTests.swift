@@ -2,6 +2,13 @@ import Foundation
 import XCTest
 
 final class CommandLineEndToEndTests: XCTestCase {
+  func testVersionIdentifiesProductReleaseAndCompatibilityContract() throws {
+    let result = try runMachBatch(arguments: ["--version"], environment: [:])
+
+    XCTAssertEqual(result.status, 0, result.error)
+    XCTAssertEqual(result.output, "MachBatch 0.0.0-dev — Slurm 26.05.4 CLI-compatible\n")
+  }
+
   func testSinfoWorksWithAutomaticFirstRunConfiguration() throws {
     let dataDirectory = FileManager.default.temporaryDirectory
       .appendingPathComponent("machbatch-e2e-\(UUID().uuidString)")
