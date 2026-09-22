@@ -1,8 +1,7 @@
 import XCTest
 
 final class GoldenTestSupport: XCTestCase {
-    func testGoldenHarnessIsAvailable() {
-        XCTAssertTrue(true)
-    }
+  func testGoldenHarnessIsAvailable() {
+    XCTAssertTrue(true)
+  }
 }
-

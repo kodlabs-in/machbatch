@@ -1,5 +1,4 @@
 @main
 enum MachBatchDaemon {
-    static func main() {}
+  static func main() {}
 }
-
