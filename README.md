@@ -31,7 +31,7 @@ MachBatch does not require a database server, Docker, a virtual machine, or root
 Homebrew and signed/notarized package distribution are planned but are not available yet. Build the current development version with Swift Package Manager:
 
 ```bash
-git clone https://github.com/KodLabs/machbatch.git
+git clone https://github.com/kodlabs-in/machbatch.git
 cd machbatch
 swift build -c release
 ```
